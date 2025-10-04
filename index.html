@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2. Log Masuk (Lokal Hardcoded)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style> body { font-family: 'Inter', sans-serif; } </style>
+</head>
+<body class="bg-gray-50 flex items-center justify-center min-h-screen p-4">
+
+    <!-- Kad Aplikasi Utama -->
+    <div id="main-container" class="w-full max-w-md bg-white p-8 rounded-xl shadow-2xl transition-all duration-300">
+
+        <h1 class="text-3xl font-bold text-center text-green-700 mb-6">Log Masuk - Peranti Tunggal</h1>
+        
+        <!-- Status Mesej -->
+        <div id="status-message" class="p-4 mb-4 text-sm text-center font-medium rounded-lg" role="alert">
+            Memuatkan sistem...
+        </div>
+
+        <!-- Borang Log Masuk -->
+        <div id="login-screen" class="space-y-4">
+            <p class="text-center text-gray-500 text-sm font-semibold p-2 bg-yellow-50 rounded-lg border border-yellow-200">
+                Gunakan kredensial **hardcoded**.
+            </p>
+            <div class="flex flex-col space-y-2">
+                <label for="username" class="text-sm font-medium text-gray-700">Username:</label>
+                <input id="username" type="text" placeholder="Masukkan username" class="p-3 border border-gray-300 rounded-lg text-sm focus:ring-green-500 focus:border-green-500" />
+            </div>
+            <div class="flex flex-col space-y-2">
+                <label for="password" class="text-sm font-medium text-gray-700">Password:</label>
+                <input id="password" type="password" placeholder="Masukkan password" class="p-3 border border-gray-300 rounded-lg text-sm focus:ring-green-500 focus:border-green-500" />
+            </div>
+
+            <!-- Butang Log Masuk -->
+            <button id="login-button" class="w-full py-3 px-4 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition duration-150 shadow-lg shadow-green-500/50">
+                Log Masuk
+            </button>
+            <p class="text-center text-xs text-gray-400 pt-2">
+                Kredensial disemak secara lokal. Sesi masih diuruskan oleh Firestore.
+            </p>
+        </div>
+
+        <!-- Maklumat Sesi (Hanya dipaparkan selepas log masuk) -->
+        <div id="session-info" class="space-y-4" style="display: none;">
+            <p class="text-center text-gray-600 mb-4 font-semibold text-lg p-2 bg-green-100 rounded-lg">Sesi Aktif</p>
+            <div class="flex flex-col space-y-2">
+                <label class="text-sm font-medium text-gray-700">ID Pengguna Sesi:</label>
+                <input id="user-id-display" type="text" readonly class="p-3 border border-gray-300 bg-gray-100 rounded-lg text-sm truncate" />
+            </div>
+            <div class="flex flex-col space-y-2 mt-2">
+                <label class="text-sm font-medium text-gray-700">ID Peranti Semasa:</label>
+                <input id="device-id-display" type="text" readonly class="p-3 border border-gray-300 bg-gray-100 rounded-lg text-sm truncate" />
+            </div>
+            <!-- Butang Log Keluar -->
+            <button id="logout-button" class="w-full mt-6 py-3 px-4 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition duration-150 shadow-lg shadow-red-500/50">
+                Log Keluar (Tamatkan Sesi)
+            </button>
+        </div>
+
+        <!-- Mesej Setelah Log Keluar -->
+        <div id="logged-out-message" class="text-center mt-6 p-6 bg-blue-100 rounded-xl" style="display: none;">
+            <p class="font-semibold text-blue-800">Anda telah log keluar.</p>
+            <p class="text-sm text-blue-700 mt-2">Sila muat semula halaman untuk log masuk semula.</p>
+        </div>
+    </div>
+    
+    <!-- Modul Firebase dan Logik Aplikasi -->
+    <script type="module">
+        // Import modul Firebase yang diperlukan
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, updateDoc, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        setLogLevel('debug');
+
+        // Konstanta Global
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // =========================================================================
+        // >>> MULA EDIT DI SINI <<<
+        // URL KE LAMAN WEB ANDA YANG LAIN SELEPAS LOG MASUK BERJAYA
+        const URL_LAMAN_UTAMA = "https://seniormedpaymentpage.my.canva.site/tiny-genius-academy-sv-w4"; // <<<< GANTI INI DENGAN URL ANDA
+        // SENARAI PENGGUNA HARDCODED UNTUK PENGESAHAN LOKAL
+        const LOCAL_USERS = {
+            "user1": "mysecret", // Username: "user1", Password: "mysecret"
+            "admin": "admin456", // Username: "admin", Password: "admin456"
+            "demo": "demo",      // Username: "demo", Password: "demo"
+            "support": "helpdesk"// Username: "support", Password: "helpdesk"
+            // Tambah pengguna baru anda di bawah:
+            // "username_baru": "password_baru"
+        };
+        // >>> TAMAT EDIT DI SINI <<<
+        // =========================================================================
+        
+        // Inisialisasi Firebase
+        let app;
+        let db;
+        let auth;
+        let currentUserId = null;
+        let isAuthReady = false;
+        let isFirebaseInitialized = false;
+
+        // Pengenal unik untuk peranti ini
+        const currentDeviceId = crypto.randomUUID();
+        
+        // Elemen UI
+        const statusMessageEl = document.getElementById('status-message');
+        const userIdDisplayEl = document.getElementById('user-id-display');
+        const deviceIdDisplayEl = document.getElementById('device-id-display');
+        const loginScreenEl = document.getElementById('login-screen');
+        const sessionInfoEl = document.getElementById('session-info');
+        const loginButton = document.getElementById('login-button');
+        const logoutButton = document.getElementById('logout-button');
+        const loggedOutMessageEl = document.getElementById('logged-out-message');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+
+        deviceIdDisplayEl.value = currentDeviceId;
+
+        // Fungsi utiliti untuk memaparkan status
+        function setStatus(message, type = 'info') {
+            let baseClasses = "p-4 mb-4 text-sm text-center font-medium rounded-lg transition-colors duration-200";
+            switch (type) {
+                case 'success':
+                    statusMessageEl.className = `${baseClasses} bg-green-100 text-green-800`;
+                    break;
+                case 'error':
+                    statusMessageEl.className = `${baseClasses} bg-red-100 text-red-800`;
+                    break;
+                case 'warning':
+                    statusMessageEl.className = `${baseClasses} bg-yellow-100 text-yellow-800`;
+                    break;
+                case 'info':
+                default:
+                    statusMessageEl.className = `${baseClasses} bg-blue-100 text-blue-800`;
+                    break;
+            }
+            statusMessageEl.innerHTML = message;
+        }
+
+        // 1. Inisialisasi Firebase
+        if (Object.keys(firebaseConfig).length > 0) {
+            app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            isFirebaseInitialized = true;
+            setStatus("Sistem bersedia. Sila Log Masuk.", 'info');
+        } else {
+            setStatus("RALAT: Konfigurasi Firebase tidak tersedia. Logik sesi tidak boleh dilaksanakan.", 'error');
+        }
+
+        // Fungsi untuk mendapatkan Rujukan Dokumen Sesi (Firestore)
+        function getSessionDocRef(uid) {
+            if (!db) return null;
+            // Sesi Awam untuk Logik Peranti Tunggal
+            return doc(db, 'artifacts', appId, 'public', 'data', 'activeSessions', uid);
+        }
+
+        // Pengurusan Heartbeat Sesi
+        let heartbeatInterval;
+        function updateSessionHeartbeat(sessionRef) {
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            
+            heartbeatInterval = setInterval(async () => {
+                if (currentUserId) {
+                    try {
+                        await updateDoc(sessionRef, {
+                            timestamp: Timestamp.now()
+                        });
+                        console.log("Heartbeat sesi dihantar.");
+                    } catch (error) {
+                        console.error("Gagal menghantar heartbeat:", error);
+                    }
+                } else {
+                    clearInterval(heartbeatInterval);
+                }
+            }, 60000); // 1 minit
+        }
+        
+        // 2. LOGIK PENGURUSAN SESI PERANTI TUNGGAL (REAL-TIME)
+        function initializeSessionListener(uid) {
+            const sessionRef = getSessionDocRef(uid);
+            if (!sessionRef) return;
+
+            onSnapshot(sessionRef, (docSnapshot) => {
+                if (!isAuthReady) return;
+                
+                if (docSnapshot.exists()) {
+                    const sessionData = docSnapshot.data();
+                    const activeDeviceId = sessionData.deviceId;
+                    
+                    if (activeDeviceId === currentDeviceId) {
+                        // Peranti yang sah - JANGAN redirect di sini, biarkan logik Log Masuk menguruskan redirect awal
+                        setStatus(`Sesi Aktif. Selamat datang, ${uid}.`, 'success');
+                        loginScreenEl.style.display = 'none';
+                        sessionInfoEl.style.display = 'block';
+                        loggedOutMessageEl.style.display = 'none';
+                        userIdDisplayEl.value = uid;
+                        updateSessionHeartbeat(sessionRef);
+                    } else {
+                        // ID Peranti BERBEZA! Sesi telah diambil alih.
+                        setStatus("RALAT SESI: Sesi anda telah diambil alih pada peranti lain. Log keluar automatik...", 'error');
+                        setTimeout(handleLogout, 3000); 
+                    }
+                } else {
+                    // Tiada sesi wujud, peranti ini boleh mengambil alih sesi
+                    // JANGAN lakukan redirect di sini kerana onSnapshot akan berjalan setiap kali halaman dimuat
+                    // Logik redirect dipindahkan ke butang klik Log Masuk.
+                    
+                    setDoc(sessionRef, {
+                        deviceId: currentDeviceId,
+                        timestamp: Timestamp.now(),
+                        userId: uid 
+                    }).then(() => {
+                        // Status ini hanya dipaparkan jika pengguna sudah berjaya log masuk tetapi sesi diambil alih.
+                        console.log("Sesi didakwa. Redirect akan dikendalikan oleh fungsi Log Masuk.");
+                    }).catch(error => {
+                        console.error("Ralat mencipta sesi:", error);
+                        setStatus("Ralat semasa mendaftar peranti. Sila cuba lagi.", 'error');
+                    });
+                }
+            }, (error) => {
+                console.error("Ralat dalam onSnapshot:", error);
+                setStatus("RALAT: Tidak dapat menyambung ke pengurusan sesi.", 'error');
+            });
+        }
+        
+        // 3. FUNGSI PENGESAHAN DENGAN HARDCODED DATA
+        /**
+         * Fungsi ini menyemak kredensial terhadap senarai pengguna hardcoded (LOCAL_USERS).
+         */
+        async function validateCredentials(username, password) {
+            const isAuthenticated = LOCAL_USERS[username] === password;
+            
+            if (isAuthenticated) {
+                // Gunakan username sebagai UID sesi
+                return { success: true, uid: username }; 
+            } else {
+                return { success: false, uid: null };
+            }
+        }
+
+        // 4. Logik Log Masuk
+        loginButton.addEventListener('click', async () => {
+            if (!isFirebaseInitialized) return;
+
+            const inputUsername = usernameInput.value.trim();
+            const inputPassword = passwordInput.value.trim();
+
+            if (!inputUsername || !inputPassword) {
+                setStatus("Sila masukkan Username dan Password.", 'warning');
+                return;
+            }
+
+            loginButton.disabled = true;
+            setStatus("Mengesahkan kredensial secara lokal...", 'info');
+
+            // Pengesahan melalui data Hardcoded
+            const validationResult = await validateCredentials(inputUsername, inputPassword);
+            loginButton.disabled = false;
+
+            if (validationResult.success) {
+                // Log masuk berjaya, gunakan username sebagai ID Sesi (UID)
+                currentUserId = validationResult.uid; 
+                
+                // Pastikan Auth asas Firebase disediakan untuk Firestore
+                if (!auth.currentUser) {
+                     await signInAnonymously(auth);
+                }
+                
+                isAuthReady = true;
+                
+                // Mulakan listener sesi
+                initializeSessionListener(currentUserId);
+
+                // REDIRECT BERLAKU DI SINI
+                setStatus(`Log Masuk Berjaya! Mengubah hala ke ${URL_LAMAN_UTAMA}...`, 'success');
+                
+                // Ubah hala selepas kelewatan singkat (1.5 saat)
+                setTimeout(() => {
+                    window.location.href = URL_LAMAN_UTAMA;
+                }, 1500);
+
+            } else {
+                setStatus("Log Masuk Gagal: Username atau Password tidak sah. Sila semak semula kredensial hardcoded.", 'error');
+            }
+        });
+
+        // 5. Logik Log Keluar (Logout)
+        async function handleLogout() {
+            if (!currentUserId) return;
+
+            const sessionRef = getSessionDocRef(currentUserId);
+            if (!sessionRef) return; 
+            
+            try {
+                setStatus("Menamatkan sesi...", 'warning');
+                await deleteDoc(sessionRef);
+            } catch (error) {
+                console.error("Ralat memadam sesi Firestore:", error);
+            }
+            
+            clearInterval(heartbeatInterval);
+            currentUserId = null;
+            
+            loginScreenEl.style.display = 'block';
+            sessionInfoEl.style.display = 'none';
+            loggedOutMessageEl.style.display = 'block';
+            
+            try {
+                await signOut(auth);
+            } catch (error) {
+                console.error("Ralat log keluar Auth:", error);
+            }
+        }
+
+        logoutButton.addEventListener('click', handleLogout);
+        
+        // Fasa Awal: Init Auth
+        window.onload = async function() {
+            if (!isFirebaseInitialized) return;
+            
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    // Auth Anonymous diperlukan untuk akses ke koleksi Awam
+                    await signInAnonymously(auth); 
+                }
+            } catch (error) {
+                 console.error("Ralat Auth Awal:", error);
+                 setStatus("RALAT: Gagal memulakan pengesahan. Sila semak konsol.", 'error');
+            }
+            isAuthReady = true;
+        }
+
+    </script>
+</body>
+</html>
