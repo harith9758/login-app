@@ -75,11 +75,11 @@
         import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, updateDoc, Timestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
-        setLogLevel('debug');
+        // setLogLevel('debug'); // Komenkan ini untuk mengelakkan ralat jika Firebase gagal dimuat
 
         // Konstanta Global
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {}; // Tukar ini untuk lebih kukuh
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         // =========================================================================
@@ -99,9 +99,9 @@
         // =========================================================================
         
         // Inisialisasi Firebase
-        let app;
-        let db;
-        let auth;
+        let app = null;
+        let db = null;
+        let auth = null;
         let currentUserId = null;
         let isAuthReady = false;
         let isFirebaseInitialized = false;
@@ -144,27 +144,34 @@
             statusMessageEl.innerHTML = message;
         }
 
-        // 1. Inisialisasi Firebase
-        if (Object.keys(firebaseConfig).length > 0) {
-            app = initializeApp(firebaseConfig);
-            db = getFirestore(app);
-            auth = getAuth(app);
-            isFirebaseInitialized = true;
-            setStatus("Sistem bersedia. Sila Log Masuk.", 'info');
+        // 1. Inisialisasi Firebase (Diubah untuk kegunaan lokal)
+        if (Object.keys(firebaseConfig).length > 0 && typeof initializeApp !== 'undefined') {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                isFirebaseInitialized = true;
+                setStatus("Sistem bersedia. Sila Log Masuk. (Firestore Aktif)", 'info');
+            } catch (e) {
+                console.error("Gagal inisialisasi Firebase:", e);
+                setStatus("Sistem bersedia. Logik Sesi Diabaikan. Sila Log Masuk.", 'warning');
+            }
         } else {
-            setStatus("RALAT: Konfigurasi Firebase tidak tersedia. Logik sesi tidak boleh dilaksanakan.", 'error');
+            // Jika firebaseConfig kosong (contoh: dibuka secara lokal), abaikan logik sesi
+            setStatus("Sistem bersedia. Logik Sesi Diabaikan. Sila Log Masuk.", 'warning');
         }
 
-        // Fungsi untuk mendapatkan Rujukan Dokumen Sesi (Firestore)
+        // Fungsi untuk mendapatkan Rujukan Dokumen Sesi (Firestore) - Hanya berfungsi jika isFirebaseInitialized true
         function getSessionDocRef(uid) {
-            if (!db) return null;
+            if (!db || !isFirebaseInitialized) return null;
             // Sesi Awam untuk Logik Peranti Tunggal
             return doc(db, 'artifacts', appId, 'public', 'data', 'activeSessions', uid);
         }
 
-        // Pengurusan Heartbeat Sesi
+        // Pengurusan Heartbeat Sesi - Hanya berfungsi jika isFirebaseInitialized true
         let heartbeatInterval;
         function updateSessionHeartbeat(sessionRef) {
+            if (!isFirebaseInitialized) return;
             if (heartbeatInterval) clearInterval(heartbeatInterval);
             
             heartbeatInterval = setInterval(async () => {
@@ -183,8 +190,10 @@
             }, 60000); // 1 minit
         }
         
-        // 2. LOGIK PENGURUSAN SESI PERANTI TUNGGAL (REAL-TIME)
+        // 2. LOGIK PENGURUSAN SESI PERANTI TUNGGAL (REAL-TIME) - Hanya berfungsi jika isFirebaseInitialized true
         function initializeSessionListener(uid) {
+            if (!isFirebaseInitialized) return;
+
             const sessionRef = getSessionDocRef(uid);
             if (!sessionRef) return;
 
@@ -196,7 +205,7 @@
                     const activeDeviceId = sessionData.deviceId;
                     
                     if (activeDeviceId === currentDeviceId) {
-                        // Peranti yang sah - JANGAN redirect di sini, biarkan logik Log Masuk menguruskan redirect awal
+                        // Peranti yang sah - Logik paparan sesi
                         setStatus(`Sesi Aktif. Selamat datang, ${uid}.`, 'success');
                         loginScreenEl.style.display = 'none';
                         sessionInfoEl.style.display = 'block';
@@ -210,15 +219,12 @@
                     }
                 } else {
                     // Tiada sesi wujud, peranti ini boleh mengambil alih sesi
-                    // JANGAN lakukan redirect di sini kerana onSnapshot akan berjalan setiap kali halaman dimuat
-                    // Logik redirect dipindahkan ke butang klik Log Masuk.
                     
                     setDoc(sessionRef, {
                         deviceId: currentDeviceId,
                         timestamp: Timestamp.now(),
                         userId: uid 
                     }).then(() => {
-                        // Status ini hanya dipaparkan jika pengguna sudah berjaya log masuk tetapi sesi diambil alih.
                         console.log("Sesi didakwa. Redirect akan dikendalikan oleh fungsi Log Masuk.");
                     }).catch(error => {
                         console.error("Ralat mencipta sesi:", error);
@@ -248,8 +254,6 @@
 
         // 4. Logik Log Masuk
         loginButton.addEventListener('click', async () => {
-            if (!isFirebaseInitialized) return;
-
             const inputUsername = usernameInput.value.trim();
             const inputPassword = passwordInput.value.trim();
 
@@ -268,17 +272,26 @@
             if (validationResult.success) {
                 // Log masuk berjaya, gunakan username sebagai ID Sesi (UID)
                 currentUserId = validationResult.uid; 
-                
-                // Pastikan Auth asas Firebase disediakan untuk Firestore
-                if (!auth.currentUser) {
-                     await signInAnonymously(auth);
+                isAuthReady = true;
+
+                if (isFirebaseInitialized) {
+                    // Laksanakan logik sesi tunggal jika Firebase tersedia
+                    if (!auth.currentUser) {
+                        try {
+                             await signInAnonymously(auth);
+                        } catch (e) {
+                            console.error("Gagal signInAnonymously:", e);
+                        }
+                    }
+                    initializeSessionListener(currentUserId);
+                } else {
+                    // LOGIK LOKAL SAHAJA (Tanpa sesi/logout)
+                    setStatus(`Log Masuk Berjaya! Mengubah hala ke ${URL_LAMAN_UTAMA}... (Mod Lokal)`, 'success');
+                    loginScreenEl.style.display = 'none';
+                    sessionInfoEl.innerHTML = `<p class="text-center text-red-600 mb-4 font-semibold text-lg p-2 bg-red-100 rounded-lg">MOD LOKAL - Sesi/Logout Tidak Berfungsi</p>`;
+                    sessionInfoEl.style.display = 'block';
                 }
                 
-                isAuthReady = true;
-                
-                // Mulakan listener sesi
-                initializeSessionListener(currentUserId);
-
                 // REDIRECT BERLAKU DI SINI
                 setStatus(`Log Masuk Berjaya! Mengubah hala ke ${URL_LAMAN_UTAMA}...`, 'success');
                 
@@ -292,8 +305,13 @@
             }
         });
 
-        // 5. Logik Log Keluar (Logout)
+        // 5. Logik Log Keluar (Logout) - Hanya berfungsi jika isFirebaseInitialized true
         async function handleLogout() {
+            if (!isFirebaseInitialized) {
+                setStatus("RALAT: Log keluar gagal. Logik sesi tidak aktif.", 'error');
+                return;
+            }
+
             if (!currentUserId) return;
 
             const sessionRef = getSessionDocRef(currentUserId);
@@ -324,7 +342,10 @@
         
         // Fasa Awal: Init Auth
         window.onload = async function() {
-            if (!isFirebaseInitialized) return;
+            if (!isFirebaseInitialized) {
+                isAuthReady = true;
+                return; // Abaikan Auth jika Firebase tidak diinisialisasi
+            }
             
             try {
                 if (initialAuthToken) {
